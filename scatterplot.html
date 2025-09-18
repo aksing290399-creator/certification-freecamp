@@ -1,0 +1,315 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Scatterplot - Cyclist Times</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- D3 -->
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <!-- FCC test runner (only needed when running tests) -->
+  <script src="https://cdn.freecodecamp.org/testable-projects-fcc/v1/bundle.js"></script>
+
+  <style>
+    :root{
+      --bg: #0f1724;
+      --card: #0b1220;
+      --accent: #06b6d4;
+      --muted: #9aa6b2;
+      --dot: #ef8354;
+    }
+    body{
+      margin: 0;
+      font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+      background: linear-gradient(180deg,#071025 0%, #081427 60%);
+      color: #e6eef6;
+      display:flex;
+      min-height:100vh;
+      align-items:center;
+      justify-content:center;
+      padding:24px;
+    }
+
+    .container{
+      width: 900px;
+      max-width: calc(100vw - 48px);
+      background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
+      border-radius: 12px;
+      padding: 18px;
+      box-shadow: 0 10px 30px rgba(2,6,23,0.7);
+    }
+
+    header{
+      display:flex;
+      align-items:baseline;
+      gap:16px;
+      margin-bottom: 8px;
+    }
+
+    #title{
+      font-size: 20px;
+      margin:0;
+      letter-spacing: -0.2px;
+    }
+
+    #subtitle{
+      color:var(--muted);
+      font-size: 13px;
+      margin:0;
+    }
+
+    svg{
+      display:block;
+      width:100%;
+      height:500px;
+      background: linear-gradient(180deg, rgba(255,255,255,0.01), rgba(255,255,255,0.00));
+      border-radius: 8px;
+    }
+
+    .dot{
+      stroke: #071027;
+      stroke-width: 1;
+      fill: var(--dot);
+      opacity: 0.9;
+    }
+
+    .dot.doping{
+      fill: #ffd166;
+    }
+
+    .legend{
+      display:flex;
+      gap:12px;
+      align-items:center;
+      margin-top:8px;
+      font-size:13px;
+      color:var(--muted);
+    }
+
+    .legend-swatch{
+      width:14px;
+      height:14px;
+      border-radius:3px;
+      display:inline-block;
+      vertical-align:middle;
+      margin-right:6px;
+    }
+
+    /* Tooltip */
+    #tooltip{
+      position: absolute;
+      pointer-events: none;
+      background: rgba(3,7,18,0.95);
+      color: #e6eef6;
+      padding: 8px 10px;
+      border-radius: 6px;
+      font-size: 13px;
+      box-shadow: 0 6px 20px rgba(2,6,23,0.8);
+      transform: translate(10px, -10px);
+      opacity: 0;
+      transition: opacity 120ms ease;
+      line-height:1.2;
+      min-width: 160px;
+      z-index: 1000;
+    }
+
+    /* axis label style */
+    .axis text {
+      fill: #b6c7d6;
+      font-size: 12px;
+    }
+    .axis line, .axis path {
+      stroke: rgba(182,199,214,0.12);
+    }
+
+    @media (max-width:640px){
+      #title{font-size:16px}
+      svg{height:420px}
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1 id="title">Doping in Professional Cycling — 35km Time Trial Results</h1>
+      <p id="subtitle">Scatterplot of Year vs. Time (minutes:seconds) — Hover points for details</p>
+    </header>
+
+    <!-- SVG will be appended here by D3 -->
+    <div id="chart"></div>
+
+    <!-- Legend (required to have id="legend") -->
+    <div id="legend" class="legend" aria-hidden="false">
+      <div style="display:flex;align-items:center">
+        <span class="legend-swatch" style="background:var(--dot)"></span>
+        <span>No doping allegations</span>
+      </div>
+      <div style="display:flex;align-items:center">
+        <span class="legend-swatch" style="background:#ffd166"></span>
+        <span>Riders with doping notes</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tooltip element required by tests -->
+  <div id="tooltip" role="tooltip" aria-hidden="true"></div>
+
+<script>
+(function(){
+  const DATA_URL = 'https://raw.githubusercontent.com/freeCodeCamp/ProjectReferenceData/master/cyclist-data.json';
+
+  // SVG sizing
+  const margin = {top: 40, right: 40, bottom: 60, left: 80};
+  const width = 900 - margin.left - margin.right;
+  const height = 500 - margin.top - margin.bottom;
+
+  const svg = d3.select('#chart')
+    .append('svg')
+    .attr('width', width + margin.left + margin.right)
+    .attr('height', height + margin.top + margin.bottom)
+    .attr('viewBox', `0 0 ${width + margin.left + margin.right} ${height + margin.top + margin.bottom}`)
+    .append('g')
+    .attr('transform', `translate(${margin.left},${margin.top})`);
+
+  const tooltip = d3.select('#tooltip');
+
+  function parseTimeToDate(timeStr){
+    // timeStr like "36:50"
+    const parts = timeStr.split(':').map(Number);
+    const minutes = parts[0];
+    const seconds = parts[1];
+    // Use Jan 1, 1970 with minutes & seconds — tests expect Date objects for y values
+    return new Date(Date.UTC(1970,0,1,0,minutes,seconds));
+  }
+
+  d3.json(DATA_URL).then(data => {
+    // convert
+    data.forEach(d => {
+      d.YearNum = +d.Year;
+      d.YearDate = new Date(d.YearNum, 0, 1); // used for x scale
+      d.TimeDate = parseTimeToDate(d.Time); // used for y scale (Date object)
+    });
+
+    // scales: x -> time scale (years), y -> time scale (minutes/seconds)
+    const xMin = d3.min(data, d => d.YearDate);
+    const xMax = d3.max(data, d => d.YearDate);
+
+    // add small padding to x domain so dots don't sit on axes edges
+    const xPadding = 1000 * 60 * 60 * 24 * 365 * 0.5; // about half-year in ms
+    const xScale = d3.scaleTime()
+      .domain([d3.timeYear.offset(xMin, -1), d3.timeYear.offset(xMax, 1)])
+      .range([0, width]);
+
+    // y domain: times (Date objects). Because these are dates anchored to epoch, min should be fastest (lower minute)
+    const yMin = d3.min(data, d => d.TimeDate);
+    const yMax = d3.max(data, d => d.TimeDate);
+
+    // scaleTime - because y is time-of-day anchored to epoch
+    const yScale = d3.scaleTime()
+      .domain([d3.timeSecond.offset(yMin, -5), d3.timeSecond.offset(yMax, 5)]) // slight padding
+      .range([0, height]); // note: later we'll invert to put faster (lower minutes) higher on chart
+
+    // IMPORTANT: For y we want smaller times (faster) to appear higher, so invert domain -> range by reversing range
+    yScale.range([0, height].reverse ? [height, 0] : [height, 0]); // ensure [height, 0]
+    yScale.range([height, 0]);
+
+    // Axes
+    const xAxis = d3.axisBottom(xScale)
+      .ticks(d3.timeYear.every(2))
+      .tickFormat(d3.timeFormat('%Y'));
+
+    const yAxis = d3.axisLeft(yScale)
+      .ticks(6)
+      .tickFormat(d3.timeFormat('%M:%S'));
+
+    // append axes
+    svg.append('g')
+      .attr('id', 'x-axis')
+      .attr('class', 'axis')
+      .attr('transform', `translate(0, ${height})`)
+      .call(xAxis);
+
+    svg.append('g')
+      .attr('id', 'y-axis')
+      .attr('class', 'axis')
+      .call(yAxis);
+
+    // axis labels
+    svg.append('text')
+      .attr('x', width / 2)
+      .attr('y', height + 44)
+      .attr('text-anchor', 'middle')
+      .attr('fill', '#b6c7d6')
+      .attr('font-size', 13)
+      .text('Year');
+
+    svg.append('text')
+      .attr('transform', 'rotate(-90)')
+      .attr('x', -height / 2)
+      .attr('y', -56)
+      .attr('text-anchor', 'middle')
+      .attr('fill', '#b6c7d6')
+      .attr('font-size', 13)
+      .text('Time (MM:SS)');
+
+    // dots group
+    const points = svg.append('g')
+      .attr('class', 'points');
+
+    points.selectAll('circle')
+      .data(data)
+      .join('circle')
+      .attr('class', d => 'dot' + (d.Doping ? ' doping' : ''))
+      .attr('r', 6)
+      // position using scales
+      .attr('cx', d => xScale(d.YearDate))
+      .attr('cy', d => yScale(d.TimeDate))
+      // required attributes for tests:
+      // data-xvalue: put full year (integer) — acceptable by FCC tests
+      // data-yvalue: put the Date object as string so tests can parse it
+      .attr('data-xvalue', d => d.YearNum)
+      .attr('data-yvalue', d => d.TimeDate.toISOString())
+      // interaction
+      .on('mouseover', (event, d) => {
+        // position tooltip near mouse
+        const [mx, my] = d3.pointer(event, document.body);
+        tooltip
+          .style('left', (mx + 12) + 'px')
+          .style('top', (my - 10) + 'px')
+          .style('opacity', 1)
+          .attr('data-year', d.YearNum) // tooltip must have data-year corresponding to data-xvalue
+          .attr('aria-hidden', 'false')
+          .html(`
+            <strong>${d.Name}</strong> — ${d.Nationality}<br/>
+            Year: ${d.YearNum} &nbsp; • &nbsp; Time: ${d.Time}<br/>
+            ${d.Doping ? `<em style="color:#ffd166">Note: ${d.Doping}</em>` : '<span style="color:#9aa6b2">No doping allegations</span>'}
+          `);
+      })
+      .on('mousemove', (event) => {
+        const [mx, my] = d3.pointer(event, document.body);
+        tooltip.style('left', (mx + 12) + 'px').style('top', (my - 10) + 'px');
+      })
+      .on('mouseout', () => {
+        tooltip.style('opacity', 0).attr('aria-hidden', 'true');
+        tooltip.attr('data-year', null).html('');
+      });
+
+    // Small title inside svg (optional in addition to the heading)
+    svg.append('text')
+      .attr('x', 0)
+      .attr('y', -12)
+      .attr('fill', '#b6c7d6')
+      .attr('font-size', 12)
+      .text('35km Time Trial Results — Cyclists and Doping Allegations');
+
+    // ensure #title exists for tests (already present in header)
+    // ensure #legend exists (above)
+
+  }).catch(err => {
+    console.error('Failed to load data', err);
+    d3.select('#chart').append('p').text('Failed to load data: ' + err.message);
+  });
+
+})();
+</script>
+</body>
+</html>
